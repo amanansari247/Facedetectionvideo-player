@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { fabric } from 'fabric';
 import * as faceapi from 'face-api.js';
+import samplevideo from '../Video/sampleVideo.mp4';
 
 const VideoPlayer = () => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const fabricCanvasRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
 
@@ -13,41 +16,37 @@ const VideoPlayer = () => {
       await faceapi.nets.faceLandmark68Net.loadFromUri('/models/weights');
       await faceapi.nets.faceRecognitionNet.loadFromUri('/models/weights');
       await faceapi.nets.faceExpressionNet.loadFromUri('/models/weights');
-    };
-
-    const detectFaces = async () => {
-      const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 512 });
-      const result = await faceapi.detectAllFaces(videoRef.current, options).withFaceLandmarks().withFaceDescriptors();
-      return result.map((face) => ({
-        box: face.detection.box,
-      }));
+      await faceapi.nets.ssdMobilenetv1.loadFromUri('/models/weights');
     };
 
     const handleVideoTimeUpdate = async () => {
-      if (videoRef.current && canvasRef.current) {
-        const faces = await detectFaces();
-        const ctx = canvasRef.current.getContext('2d');
+      if (videoRef.current && fabricCanvasRef.current) {
+        const faces = await faceapi.detectAllFaces(videoRef.current).withFaceLandmarks().withFaceDescriptors();
+        const fabricCanvas = fabricCanvasRef.current;
 
-        canvasRef.current.width = videoRef.current.clientWidth;
-        canvasRef.current.height = videoRef.current.clientHeight;
+        // Set canvas dimensions to match the video size
+        fabricCanvas.setDimensions({
+          width: videoRef.current.clientWidth,
+          height: videoRef.current.clientHeight,
+        });
 
-        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        fabricCanvas.clear();
+        setFaceDetected(faces.length > 0);
 
-        if (faces.length > 0) {
-          setFaceDetected(true);
-
-          faces.forEach((face) => {
-            const { x, y, width, height } = face.box;
-            ctx.beginPath();
-            ctx.rect(x, y, width, height);
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = 'red';
-            ctx.stroke();
-            ctx.closePath();
+        faces.forEach((face) => {
+          const { x, y, width, height } = face.detection.box;
+          // Adjust coordinates based on the video and canvas dimensions
+          const rect = new fabric.Rect({
+            left: (x / videoRef.current.videoWidth) * fabricCanvas.width,
+            top: (y / videoRef.current.videoHeight) * fabricCanvas.height,
+            width: (width / videoRef.current.videoWidth) * fabricCanvas.width,
+            height: (height / videoRef.current.videoHeight) * fabricCanvas.height,
+            fill: 'rgba(255, 0, 0, 0.3)',
+            selectable: false,
           });
-        } else {
-          setFaceDetected(false);
-        }
+
+          fabricCanvas.add(rect);
+        });
       }
     };
 
@@ -85,15 +84,50 @@ const VideoPlayer = () => {
     }
   };
 
+  useEffect(() => {
+    if (canvasRef.current) {
+      fabricCanvasRef.current = new fabric.Canvas(canvasRef.current);
+    }
+  }, []);
+
+  const handleVideoLoadedMetadata = () => {
+    if (videoRef.current && fabricCanvasRef.current) {
+      fabricCanvasRef.current.setDimensions({
+        width: videoRef.current.clientWidth,
+        height: videoRef.current.clientHeight,
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.addEventListener('loadedmetadata', handleVideoLoadedMetadata);
+    }
+
+    return () => {
+      if (videoRef.current) {
+        videoRef.current.removeEventListener('loadedmetadata', handleVideoLoadedMetadata);
+      }
+    };
+  }, []);
+
   return (
     <div className="flex flex-col items-center justify-center">
       <input type="file" accept="video/*" onChange={handleUpload} className="mt-2 mb-4" />
       <div style={{ position: 'relative' }}>
-        <video ref={videoRef} controls width="100%" height="auto" style={{ position: 'absolute', top: 0, left: 0 }} />
-        <canvas ref={canvasRef} className="mt-4 border border-gray-300" />
-        {faceDetected && <p style={{ position: 'absolute', top: '10px', left: '50%', transform: 'translateX(-50%)', color: 'red' }}>Face Detected!</p>}
+        <video
+          ref={videoRef}
+          controls
+          width="100%"
+          height="auto"
+          style={{ position: 'absolute', top: 12, left: 0 }}
+        >
+          <source src={samplevideo} type="video/mp4" />
+          Your browser does not support the video tag.
+        </video>
+        <canvas ref={canvasRef} className="mt-4 border border-gray-300" style={{ position: 'absolute', top: 0, left: 0 }} />
       </div>
-      <button onClick={handlePlayPause} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">
+      <button onClick={handlePlayPause} className="mt-12 px-4 py-2 bg-blue-500 text-white rounded">
         {isPlaying ? 'Pause' : 'Play'}
       </button>
     </div>
